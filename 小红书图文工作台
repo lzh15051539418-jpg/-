@@ -1,0 +1,220 @@
+{
+  "name": "xiaohongshu-ai-workbench",
+  "version": "1.0.0",
+  "description": "小红书图文AI工作台后端",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3"
+  }
+}
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const app = express();
+
+const API_KEY = process.env.VOLC_API_KEY;
+const API_URL = process.env.VOLC_API_URL || "https://ark.cn-beijing.volces.com/api/v1/images/generations";
+
+app.use(cors());
+app.use(express.json({ limit: '10mb' })); // 限制图片base64大小
+
+// AI绘图接口
+app.post('/api/generate', async (req, res) => {
+  try {
+    const { prompt, count, referenceImage } = req.body;
+    if (!prompt) return res.status(400).json({ error: "缺少提示词" });
+
+    // 自动追加负面提示词，专门规避AI畸形，适配你的小红书素人写实图
+    const negativePrompt = "畸形人脸，扭曲五官，多余手指，残缺肢体，水印，文字，logo，卡通，动漫，3D渲染，模糊，低画质，变形，丑化";
+    const payload = {
+      model: "doubao-image",
+      prompt: prompt,
+      negative_prompt: negativePrompt,
+      n: count
+    };
+
+    // 如果上传参考图，剥离base64前缀
+    if(referenceImage){
+      const base64Str = referenceImage.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
+      payload.reference_image = base64Str;
+      payload.reference_type = "style"; // style：只提取风格，保留你文案主体
+    }
+
+    // 请求火山图像API
+    const fetchRes = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await fetchRes.json();
+    return res.json(data);
+  } catch(err){
+    console.error(err);
+    return res.status(500).json({error: "服务异常："+err.message});
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, ()=>{
+  console.log(`✅ 后端服务启动成功`);
+});
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>小红书图文 AI 工作台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+  <div class="min-h-screen flex">
+    <!-- 左侧导航 -->
+    <aside class="w-64 bg-white border-r border-gray-200 p-5 hidden md:block">
+      <h2 class="text-xl font-bold text-rose-500 mb-6">📷 图文 AI 工作台</h2>
+      <nav class="space-y-3">
+        <a href="#" class="block px-4 py-2 rounded-lg bg-rose-50 text-rose-600 font-medium">工作台</a>
+        <a href="#" class="block px-4 py-2 rounded-lg hover:bg-gray-50">文案生图</a>
+        <a href="#" class="block px-4 py-2 rounded-lg hover:bg-gray-50">参考图生图</a>
+        <a href="#" class="block px-4 py-2 rounded-lg hover:bg-gray-50">模板库</a>
+        <a href="#" class="block px-4 py-2 rounded-lg hover:bg-gray-50">我的作品</a>
+        <a href="#" class="block px-4 py-2 rounded-lg hover:bg-gray-50">风格设置</a>
+      </nav>
+    </aside>
+
+    <!-- 主内容 -->
+    <main class="flex-1 p-6">
+      <header class="mb-6">
+        <h1 class="text-2xl font-bold">生成小红书图文</h1>
+        <p class="text-gray-500">输入文案或上传参考图，复刻风格生成配图</p>
+      </header>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- 输入区 -->
+        <div class="lg:col-span-2 space-y-5">
+          <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <label class="block text-sm font-medium mb-2">📝 小红书文案 / 主题</label>
+            <textarea id="promptText" rows="5" class="w-full border border-gray-200 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-rose-200" placeholder="例：微信视频美颜对比图，素人女生，真实手机通话界面，3:4，黑色背景，对比明显，高清写实，无AI畸形"></textarea>
+          </div>
+
+          <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <label class="block text-sm font-medium mb-2">🖼️ 上传参考图（开启风格复刻）</label>
+            <div class="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center">
+              <input type="file" id="imageUpload" accept="image/*" class="hidden" />
+              <label for="imageUpload" class="cursor-pointer text-rose-500 font-medium">点击上传图片</label>
+              <p class="text-gray-400 text-sm mt-2">上传后AI会学习这张图的色调、构图、画风</p>
+            </div>
+            <div id="previewBox" class="mt-4 hidden">
+              <img id="imagePreview" class="w-40 h-40 object-cover rounded-lg border border-gray-200" />
+              <p class="text-green-500 text-sm mt-2">✅ 已启用参考图风格复刻</p>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <label class="block text-sm font-medium mb-3">⚙️ 生成设置</label>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <label class="text-xs text-gray-500">图片比例</label>
+                <select id="ratioSelect" class="w-full border border-gray-200 rounded-lg p-2 mt-1 text-sm">
+                  <option value="3:4" selected>3:4 小红书竖图</option>
+                  <option value="4:5">4:5 竖图</option>
+                  <option value="1:1">1:1 方图</option>
+                  <option value="9:16">9:16</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500">基础风格</label>
+                <select id="styleSelect" class="w-full border border-gray-200 rounded-lg p-2 mt-1 text-sm">
+                  <option value="写实素人，超清画质，避免AI失真，小红书种草图">写实素人</option>
+                  <option value="奶油感，柔和暖光，高级生活摄影">奶油感</option>
+                  <option value="清冷自然光，极简构图">清冷感</option>
+                  <option value="胶片颗粒，松弛日常">胶片感</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500">主体描述</label>
+                <input id="subjectInput" type="text" class="w-full border border-gray-200 rounded-lg p-2 mt-1 text-sm" placeholder="人物/产品">
+              </div>
+              <div>
+                <label class="text-xs text-gray-500">生成数量</label>
+                <select id="countSelect" class="w-full border border-gray-200 rounded-lg p-2 mt-1 text-sm">
+                  <option value="1">1张</option>
+                  <option value="2">2张</option>
+                  <option value="4" selected>4张</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <button id="generateBtn" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-medium py-3 rounded-lg transition">
+            🚀 生成小红书图片
+          </button>
+        </div>
+
+        <!-- 结果区 -->
+        <div class="space-y-5">
+          <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <h3 class="text-lg font-semibold mb-4">🎨 生成结果</h3>
+            <div id="resultGrid" class="grid grid-cols-2 gap-3">
+              <div class="bg-gray-50 rounded-lg h-48 flex items-center justify-center text-gray-400 text-sm">等待生成</div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <h3 class="text-lg font-semibold mb-3">💡 风格提示模板</h3>
+            <div class="space-y-2 text-sm">
+              <button class="w-full text-left px-3 py-2 rounded-lg bg-gray-50 hover:bg-rose-50" onclick="fillStyle('写实素人，超清画质，避免AI失真，小红书种草图')">
+                写实素人（你的美颜笔记专用）
+              </button>
+              <button class="w-full text-left px-3 py-2 rounded-lg bg-gray-50 hover:bg-rose-50" onclick="fillStyle('奶油感，柔和暖光，浅米白背景，生活摄影')">
+                奶油感生活
+              </button>
+              <button class="w-full text-left px-3 py-2 rounded-lg bg-gray-50 hover:bg-rose-50" onclick="fillStyle('清冷自然光，白灰色调，极简构图')">
+                清冷极简
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+    // ============ 部署完Render后替换这里！！============
+    const BACKEND_API = "https://xxx.onrender.com/api/generate";
+    // ==================================================
+
+    // 图片上传预览 & 转base64
+    const imageUpload = document.getElementById('imageUpload');
+    const previewBox = document.getElementById('previewBox');
+    const imagePreview = document.getElementById('imagePreview');
+    let refImageBase64 = null;
+
+    imageUpload.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        imagePreview.src = event.target.result;
+        refImageBase64 = event.target.result;
+        previewBox.classList.remove('hidden');
+      };
+      reader.readAsDataURL(file);
+    });
+
+    function fillStyle(styleText) {
+      document.getElementById('styleSelect').value = styleText;
+    }
+
+    // 组装提示词
+    function buildPrompt() {
+      const promptText = document.getElementById('promptText').value.trim();
+      const subject = document.getElementById('subjectInput').va
